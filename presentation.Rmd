@@ -1,0 +1,163 @@
+---
+title: "Practical Machine Learning: Predicting Exercise  "
+author: "Jose Martinez"
+date: "12/1/2020"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = TRUE)
+knitr::opts_chunk$set(message = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+
+library(caret)
+library(gbm)
+library(ggplot2)
+library(gbm)
+library(gridExtra)
+library(rattle)
+```
+
+## Executive Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E)
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with.  Will also use your prediction model to predict 20 different test cases.
+
+
+## Data
+
+As usual, we start loading the data
+
+```{r data}
+training_data <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                          stringsAsFactors=TRUE, na.strings = c("NA", "", "#DIV/0!"))
+
+test_data <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                      stringsAsFactors=TRUE, na.strings = c("NA", "", "#DIV/0!"))
+
+```
+
+
+## Clean the data
+
+If we examing the availabiliy of all the data we can see several columns incomplete. In previous cycles we manage to identify the blank field ("") and a computation error (#DIV/0!) as empty fields. We just included them as NA in the reading of our data
+
+``` {r clean}
+unlist(lapply(training_data, function(x) mean(is.na(x))))
+```
+
+We decided to just work with the columns with full data. We apply this to both data groups
+
+``` {r clean2}
+training_data2<- training_data[,unlist(lapply(training_data, function(x)  mean(is.na(x)) ==  0))]
+
+test_data2<- test_data[,unlist(lapply(test_data, function(x)  mean(is.na(x)) ==  0))]
+```
+
+We are also removing the columns called "x", "name", "new window" and "num window" as well as any other related to timestamps
+
+``` {r clean3}
+test_data2<-test_data2[,-c(1:7)]
+training_data2 <- training_data2[,-c(1:7)]
+```
+
+## Cross Validation
+
+We are going to use two cross validations approaches: data split approach and K-fold validation.
+The first is very helpful to be able to have a validation data set to test the model before using the test data. With this validation set we are going to select the right model.
+
+K-fold help us to create faster models and its a very effective method to estimate the prediction error and the accuracy of the model
+
+``` {r cross}
+#Data split
+set.seed(1335)
+trainIndex <- createDataPartition(y=training_data2$classe,p=0.7,list=FALSE)
+subTrainData <- training_data2[trainIndex,]
+subTestData <- training_data2[-trainIndex,]
+#k-fold
+train_control <- trainControl(method = "cv", number = 10) 
+
+```
+
+### Prediction models
+#### 1. Decision Tree
+
+Our first option is prediction with trees. We are using the kfold train funciont we create previously. We apply this to all our models
+
+``` {r des_Tree}
+modelFit_tree<-train(classe~., data=subTrainData, method="rpart", trControl=train_control)
+fancyRpartPlot(modelFit_tree$finalModel)
+```
+
+Its looks simple enough. Lets keep creating our other models
+
+#### 2. Boosting
+
+``` {r boosting}
+modelFit_boosting<-train(classe~., data=subTrainData, method="gbm", verbose=FALSE, trControl=train_control)
+
+```
+
+#### 3. Random Forrest
+
+``` {r rf}
+modelFit_rf<-train(classe~., data=subTrainData, method="rf", trControl=train_control)
+```
+
+
+### Model comparision
+
+Lets create some predictions using each of our models and the validation set we created earlier
+
+``` {r comp}
+pred_tree <- predict(modelFit_tree,subTestData)
+
+pred_boosting <- predict(modelFit_boosting,subTestData)
+
+pred_rf <- predict(modelFit_rf,subTestData)
+```
+
+Now this is the fun part. Lets compare the results of each prediction and select the one with the best accuracy
+
+``` {r accuracy}
+#Decision Tree
+confusionMatrix(subTestData$classe, pred_tree)$overall
+#Boosting
+confusionMatrix(subTestData$classe, pred_boosting)$overall
+#Random Forrest
+confusionMatrix(subTestData$classe, pred_rf)$overall
+
+```
+
+Random forrest is giving us right now 99.23% accuracy. This is a good result. In the next plot we can see the distribution of hits and misses for our 5 classes
+
+``` {r compplot}
+plot(confusionMatrix(subTestData$classe, pred_rf)$table)
+```
+
+This takes us to the expected out of sample error. Lets look at how the model behave with our training data
+
+``` {r rttrain}
+pred_train_rf <- predict(modelFit_rf, subTrainData)
+
+confusionMatrix(subTrainData$classe, pred_train_rf)
+```
+
+We had a 100% efficiency with our training data. We just lost 0.77% in accuracy.
+
+
+### Final prediction
+
+Finally, lets use our model to predit the 20 cases using the test data retrieved in the first step.
+
+``` {r validationtest}
+pred_final_rf <- predict(modelFit_rf,test_data2)
+
+pred_final_rf
+
+```
+
